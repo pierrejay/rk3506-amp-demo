@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DMX Gateway</title>
+    <!-- Bloque la requête 404 favicon -->
+    <link rel="icon" href="data:,">
+    <style>
+        :root {
+            --bg: #121212;
+            --surface: #1e1e1e;
+            --primary: #3b82f6;
+            --text: #e5e5e5;
+            --border: #333;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 16px;
+            padding-bottom: 80px;
+        }
+
+        /* --- UI Components --- */
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 24px; position: sticky; top: 0;
+            background: rgba(18, 18, 18, 0.95); backdrop-filter: blur(5px);
+            z-index: 100; padding: 12px 0; border-bottom: 1px solid var(--border);
+        }
+        h1 { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #444; transition: 0.3s; margin-left: 10px; }
+        .status-dot.on { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+
+        /* Switch */
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #333; transition: .3s; border-radius: 24px; border: 1px solid #555; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 2px; bottom: 2px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #166534; border-color: #22c55e; }
+        input:checked + .slider:before { transform: translateX(20px); }
+        .switch-label { font-size: 11px; font-weight: bold; text-transform: uppercase; margin-right: 8px; color: #888; }
+
+        /* Groups & Lights */
+        .group { background: var(--surface); border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border); overflow: hidden; }
+        .group-header { display: flex; align-items: center; padding: 12px; background: #252525; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+        .group-header:hover { background: #2a2a2a; }
+        .group-title { font-weight: 700; flex: 1; font-size: 14px; text-transform: uppercase; }
+        .group.collapsed .group-content { display: none; }
+        .group.collapsed .arrow { transform: rotate(-90deg); }
+        .arrow { margin-right: 10px; font-size: 10px; transition: transform 0.2s; color: #666; }
+
+        .group-master { padding: 16px; background: rgba(0,0,0,0.3); border-bottom: 1px solid var(--border); }
+        .lbl-sect { font-size: 10px; color: var(--primary); font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; display: block; }
+        
+        .light-list { padding: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+        .light { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 12px; }
+        .light-head { display: flex; align-items: center; margin-bottom: 10px; gap: 10px; }
+        .light-name { font-size: 13px; font-weight: 600; color: #aaa; flex: 1; }
+        .color-preview { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #444; }
+
+        /* Controls */
+        .btn-bo { background: transparent; border: 1px solid #552020; color: #ef5350; border-radius: 4px; padding: 2px 6px; font-size: 10px; cursor: pointer; font-weight: bold; }
+        .btn-bo:hover { background: #451a03; border-color: #ef4444; }
+
+        .ch-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .ch-info { display: flex; align-items: center; gap: 8px; width: 85px; }
+        .ch-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .ch-label { font-size: 11px; color: #888; font-family: monospace; text-transform: uppercase; width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        input[type=range] { -webkit-appearance: none; flex: 1; background: transparent; height: 24px; cursor: pointer; }
+        input[type=range]:focus { outline: none; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: #333; border-radius: 2px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #ccc; margin-top: -6px; }
+        
+        .ch-val { width: 38px; background: #111; border: 1px solid #444; color: #ddd; border-radius: 3px; padding: 3px; font-size: 11px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div style="display:flex; align-items:center">
+        <h1>DMX Console</h1>
+        <div class="status-dot" id="status" title="Connection Status"></div>
+    </div>
+    <div style="display:flex; align-items:center;">
+        <span class="switch-label">Master Output</span>
+        <label class="switch">
+            <input type="checkbox" id="global-toggle" onchange="toggleGlobal(this)">
+            <span class="slider"></span>
+        </label>
+    </div>
+</header>
+
+<div id="app">
+    <div style="text-align:center; color:#555; margin-top:50px;">Waiting for gateway...</div>
+</div>
+
+<script>
+    // Global State
+    let ws;
+    let config = { lights: {}, groups: [] };
+    let state = { values: {} };
+    let activeInteractions = new Set(); 
+
+    // --- Core Functions ---
+
+    function toggleGlobal(el) {
+        send({ cmd: el.checked ? 'enable' : 'disable' });
+    }
+
+    function toggleGroup(el) {
+        el.parentElement.classList.toggle('collapsed');
+    }
+
+    function blackoutTarget(target, type) {
+        const values = {};
+        if (type === 'group') {
+            const lights = Object.values(config.lights).filter(l => l.group === target);
+            lights.forEach(l => l.channels.forEach(c => values[c.name] = 0));
+        } else {
+            // target is "group/light" - config.lights is a flat map with this key
+            const l = config.lights[target];
+            if (l) l.channels.forEach(c => values[c.name] = 0);
+        }
+        send({ cmd: 'set', target: target, values: values });
+    }
+
+    function connect() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${location.host}/ws`);
+        
+        ws.onopen = () => {
+            console.log("Connected");
+            const el = document.getElementById('status');
+            if(el) el.classList.add('on');
+        };
+        
+        ws.onclose = () => {
+            const el = document.getElementById('status');
+            if(el) el.classList.remove('on');
+            setTimeout(connect, 1000);
+        };
+
+        ws.onmessage = (e) => {
+            try {
+                handleMessage(JSON.parse(e.data));
+            } catch(err) { console.error("Msg error", err); }
+        };
+    }
+
+    function handleMessage(msg) {
+        if (msg.type === 'init') {
+            config.lights = msg.lights;
+            config.groups = msg.groups || [];
+            buildUI();
+            // Extract values from lights (init message has lights[key].values, not top-level values)
+            const initValues = {};
+            for (const key in msg.lights) {
+                if (msg.lights[key].values) {
+                    initValues[key] = msg.lights[key].values;
+                }
+            }
+            updateValues(initValues);
+            const toggle = document.getElementById('global-toggle');
+            if(toggle && msg.enabled !== undefined) toggle.checked = msg.enabled;
+        } else if (msg.type === 'state') {
+            updateValues(msg.values);
+            const toggle = document.getElementById('global-toggle');
+            if(toggle && msg.enabled !== undefined) toggle.checked = msg.enabled;
+        }
+    }
+
+    function send(payload) {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify(payload));
+    }
+
+    // --- UI Builders ---
+
+    function buildUI() {
+        const app = document.getElementById('app');
+        if(!app) return;
+        app.innerHTML = '';
+
+        config.groups.forEach(groupName => {
+            const groupLights = Object.values(config.lights).filter(l => l.group === groupName);
+            if (!groupLights.length) return;
+
+            // Master Channels (Union)
+            const masterChannels = new Set();
+            const masterColors = {}; 
+            groupLights.forEach(l => {
+                l.channels.forEach(ch => {
+                    masterChannels.add(ch.name);
+                    masterColors[ch.name] = ch.color;
+                });
+            });
+
+            const groupEl = document.createElement('div');
+            groupEl.className = 'group';
+            
+            // Note: Using simpler HTML strings to avoid syntax errors
+            let html = '<div class="group-header" onclick="toggleGroup(this)">';
+            html += '<span class="arrow">▼</span>';
+            html += '<span class="group-title">' + groupName + '</span>';
+            html += '<button class="btn-bo" onclick="event.stopPropagation(); blackoutTarget(\'' + groupName + '\', \'group\')">BO</button>';
+            html += '</div>';
+            
+            html += '<div class="group-content">';
+            
+            // Masters
+            html += '<div class="group-master"><span class="lbl-sect">Master Faders</span>';
+            masterChannels.forEach(chName => {
+                html += buildSliderHtml('master_'+groupName+'_'+chName, chName, masterColors[chName], true, groupName);
+            });
+            html += '</div>'; // end master
+
+            // Lights
+            html += '<div class="light-list">';
+            groupLights.forEach(l => {
+                const key = l.group + '/' + l.name;
+                const safeKey = key.replace(/[\/\s]/g, '_');
+                
+                html += '<div class="light">';
+                html += '<div class="light-head">';
+                html += '<div class="color-preview" id="pv_' + safeKey + '"></div>';
+                html += '<span class="light-name">' + l.name + '</span>';
+                html += '<button class="btn-bo" onclick="blackoutTarget(\'' + key + '\', \'light\')">BO</button>';
+                html += '</div>'; // end head
+
+                l.channels.forEach(ch => {
+                    html += buildSliderHtml('ch_'+safeKey+'_'+ch.name, ch.name, ch.color, false, key);
+                });
+                html += '</div>'; // end light
+            });
+            html += '</div>'; // end light-list
+            
+            html += '</div>'; // end group-content
+            
+            groupEl.innerHTML = html;
+            app.appendChild(groupEl);
+        });
+
+        bindEvents();
+    }
+
+    function buildSliderHtml(id, label, colorHex, isMaster, target) {
+        // Safe string concatenation instead of template literals for robustness
+        const type = isMaster ? 'group' : 'light';
+        return '<div class="ch-row">' +
+            '<div class="ch-info">' +
+                '<div class="ch-dot" style="background:' + colorHex + '"></div>' +
+                '<span class="ch-label" title="' + label + '">' + label + '</span>' +
+            '</div>' +
+            '<input type="range" id="sl_' + id + '" min="0" max="255" value="0" ' +
+                'data-target="' + target + '" data-ch="' + label + '" data-type="' + type + '">' +
+            '<input type="number" id="nb_' + id + '" class="ch-val" min="0" max="255" value="0">' +
+        '</div>';
+    }
+
+    function bindEvents() {
+        // Sliders
+        const sliders = document.querySelectorAll('input[type=range]');
+        for(let i=0; i<sliders.length; i++) {
+            const el = sliders[i];
+            el.oninput = function(e) { handleInput(e.target, parseInt(e.target.value)); };
+            el.onmousedown = function(e) { activeInteractions.add(e.target.id); };
+            el.ontouchstart = function(e) { activeInteractions.add(e.target.id); };
+            el.onchange = function(e) { activeInteractions.delete(e.target.id); };
+        }
+        
+        // Number inputs
+        const nums = document.querySelectorAll('input[type=number]');
+        for(let i=0; i<nums.length; i++) {
+            const el = nums[i];
+            el.onchange = function(e) {
+                // Find data from sibling slider
+                const baseId = e.target.id.substring(3);
+                const sl = document.getElementById('sl_' + baseId);
+                if(sl) {
+                    let v = parseInt(e.target.value);
+                    if(isNaN(v)) v = 0;
+                    v = Math.max(0, Math.min(255, v));
+                    handleInput(sl, v); // reuse logic passing slider as source
+                }
+            };
+        }
+    }
+
+    function handleInput(sourceEl, value) {
+        const type = sourceEl.dataset.type;
+        const target = sourceEl.dataset.target;
+        const ch = sourceEl.dataset.ch;
+        
+        // Sync partner
+        const baseId = sourceEl.id.substring(3); 
+        const isSlider = sourceEl.type === 'range';
+        const partnerId = (isSlider ? 'nb_' : 'sl_') + baseId;
+        const partner = document.getElementById(partnerId);
+        if (partner) partner.value = value;
+
+        // Local Master logic
+        if (type === 'group') {
+            const lightsInGroup = Object.values(config.lights).filter(l => l.group === target);
+            lightsInGroup.forEach(l => {
+                const safeKey = (l.group + '_' + l.name).replace(/[\/\s]/g, '_');
+                // Check channel existence
+                if (l.channels.some(c => c.name === ch)) {
+                    updateLocalUI(l.group, l.name, ch, value, safeKey);
+                }
+            });
+        } else {
+            // Local Light logic
+             const [g, lName] = target.split('/');
+             const safeKey = (g + '_' + lName).replace(/[\/\s]/g, '_');
+             updateLocalUI(g, lName, ch, value, safeKey);
+        }
+
+        const payload = {};
+        payload[ch] = value;
+        send({ cmd: 'set', target: target, values: payload });
+    }
+
+    function updateLocalUI(group, light, ch, val, safeKey) {
+        const key = group + '/' + light;
+        if (!state.values[key]) state.values[key] = {};
+        state.values[key][ch] = val;
+
+        const baseId = 'ch_' + safeKey + '_' + ch;
+        const sl = document.getElementById('sl_' + baseId);
+        const nb = document.getElementById('nb_' + baseId);
+        
+        if (sl && !activeInteractions.has(sl.id)) sl.value = val;
+        if (nb && document.activeElement !== nb) nb.value = val;
+        
+        updatePreview(key, safeKey);
+    }
+
+    function updateValues(valuesMap) {
+        // Track which group/channel combos need master update
+        const masterUpdates = {}; // { groupName: { chName: [values...] } }
+
+        for (const key in valuesMap) {
+            if (!state.values[key]) state.values[key] = {};
+            const vals = valuesMap[key];
+            Object.assign(state.values[key], vals);
+
+            const safeKey = key.replace(/[\/\s]/g, '_');
+            const [groupName] = key.split('/');
+
+            for (const ch in vals) {
+                const baseId = 'ch_' + safeKey + '_' + ch;
+                const sl = document.getElementById('sl_' + baseId);
+                const nb = document.getElementById('nb_' + baseId);
+                const val = vals[ch];
+
+                if (sl && !activeInteractions.has(sl.id)) sl.value = val;
+                if (nb && document.activeElement !== nb) nb.value = val;
+
+                // Collect for master slider update
+                if (!masterUpdates[groupName]) masterUpdates[groupName] = {};
+                if (!masterUpdates[groupName][ch]) masterUpdates[groupName][ch] = [];
+                masterUpdates[groupName][ch].push(val);
+            }
+            updatePreview(key, safeKey);
+        }
+
+        // Update master sliders: use max value among lights in group
+        for (const groupName in masterUpdates) {
+            for (const ch in masterUpdates[groupName]) {
+                const values = masterUpdates[groupName][ch];
+                const maxVal = Math.max(...values);
+                const masterId = 'master_' + groupName + '_' + ch;
+                const sl = document.getElementById('sl_' + masterId);
+                const nb = document.getElementById('nb_' + masterId);
+
+                if (sl && !activeInteractions.has(sl.id)) sl.value = maxVal;
+                if (nb && document.activeElement !== nb) nb.value = maxVal;
+            }
+        }
+    }
+
+    function updatePreview(key, safeKey) {
+        const l = config.lights[key];
+        const el = document.getElementById('pv_' + safeKey);
+        if (!l || !el) return;
+
+        let r=0, g=0, b=0;
+        const currentVals = state.values[key] || {};
+
+        l.channels.forEach(c => {
+            const val = (currentVals[c.name] || 0) / 255;
+            const hex = c.color; 
+            r += parseInt(hex.substr(1,2), 16) * val;
+            g += parseInt(hex.substr(3,2), 16) * val;
+            b += parseInt(hex.substr(5,2), 16) * val;
+        });
+        
+        const rgb = 'rgb(' + Math.min(255,r|0) + ',' + Math.min(255,g|0) + ',' + Math.min(255,b|0) + ')';
+        el.style.backgroundColor = rgb;
+        el.style.boxShadow = '0 0 6px ' + rgb;
+    }
+
+    // Start
+    window.onload = connect;
+
+</script>
+</body>
+</html>

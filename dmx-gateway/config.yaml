@@ -1,0 +1,28 @@
+# DMX Gateway - Dev config
+# 1 multi-channel horticulture light
+# For run on target using actual DMX client
+
+server:
+  http: ":8080"
+
+dmx:
+  client: "/usr/bin/dmx"
+  # device: "/dev/ttyRPMSG0"  # Optional: defaults to /dev/ttyRPMSG0
+
+# Modbus TCP server (port 502 for production)
+modbus:
+  port: ":502"
+
+# MQTT: uncomment to enable
+# mqtt:
+#   broker: "tcp://localhost:1883"
+#   topic_prefix: "dmx"
+
+lights:
+  # Rack 1
+  rack1:
+    level1:
+      - { ch: 1, color: red }
+      - { ch: 2, color: blue }
+      - { ch: 3, color: white }
+      - { ch: 4, color: far_red }

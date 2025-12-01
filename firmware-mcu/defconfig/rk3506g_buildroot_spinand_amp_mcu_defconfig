@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2025 Pierre Jay
+#
+# RK3506G Luckfox Lyra - AMP (CPU2) + MCU (M0+) Configuration
+#
+# This defconfig enables BOTH:
+#   - CPU2 RT-Thread with DMX #1 (existing, unchanged)
+#   - MCU bare-metal with DMX #2 (new)
+#
+# Usage:
+#   ./build.sh lunch rk3506g_buildroot_spinand_amp_mcu_defconfig
+#   ./build.sh
+#
+# Differences from rk3506g_buildroot_spinand_amp_defconfig:
+#   - RK_KERNEL_DTS_NAME uses amp-mcu variant (includes MCU RPMSG node)
+#   - Same ITS file (amp_linux_mcu.its already includes MCU)
+#
+RK_ROOTFS=y
+RK_BUILDROOT_BASE_CFG="rk3506_luckfox"
+# RK_YOCTO is not set
+RK_ROOTFS_UBI=y
+RK_ROOTFS_HOSTNAME_CUSTOM=y
+RK_ROOTFS_HOSTNAME="luckfox"
+RK_ROOTFS_INSTALL_MODULES=y
+# RK_WIFIBT is not set
+# RK_ROOTFS_LOG_GUARDIAN is not set
+RK_EXTRA_FONTS_ENABLED_EN=y
+# RK_LUCKFOX_CONFIG is not set
+RK_UBOOT_CFG="rk3506_luckfox"
+RK_UBOOT_CFG_FRAGMENTS="rk-amp"
+RK_AMP=y
+RK_AMP_FIT_ITS="amp_linux_mcu.its"
+RK_AMP_MCU_HAL_TARGET="rk3506-mcu"
+RK_KERNEL_CFG="rk3506_luckfox_defconfig"
+RK_KERNEL_CFG_FRAGMENTS="rockchip_amp.config rk3506-display.config"
+# CHANGED: Use MCU-enabled DTS
+RK_KERNEL_DTS_NAME="rk3506g-luckfox-lyra-amp-mcu-spinand"
+RK_BOOT_COMPRESSED=y
+RK_EXTRA_PARTITION_NUM=0
+RK_PARAMETER="parameter-lyra-spinand-amp.txt"
+RK_USE_FIT_IMG=y
+# RK_NETWORK_CHECK is not set

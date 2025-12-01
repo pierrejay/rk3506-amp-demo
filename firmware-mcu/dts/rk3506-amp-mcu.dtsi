@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2025 Pierre Jay
+ *
+ * RK3506 AMP + MCU configuration
+ *
+ * Extends rk3506-amp.dtsi to add MCU (Cortex-M0+) RPMSG support.
+ * Based on rk3506-amp.dtsi from Rockchip SDK.
+ */
+
+#include "rk3506-amp.dtsi"
+
+/ {
+	/*
+	 * MCU RPMSG node - Second DMX universe
+	 *
+	 * Uses different resources from CPU2 to avoid conflicts:
+	 *   - link-id: 0x04 (MCU) vs 0x02 (CPU2)
+	 *   - memory:  0x3c20000 vs 0x3c00000 (128KB offset)
+	 *   - mailbox: mailbox1/3 vs mailbox0/2
+	 */
+	rpmsg_mcu: rpmsg-mcu@3c20000 {
+		compatible = "rockchip,rpmsg";
+		mbox-names = "rpmsg-rx", "rpmsg-tx";
+		mboxes = <&mailbox1 0 &mailbox3 0>;
+		rockchip,vdev-nums = <1>;
+		/* MCU: link-id 0x04 (master=0, remote=4) */
+		rockchip,link-id = <0x04>;
+		reg = <0x3c20000 0x20000>;
+		memory-region = <&rpmsg_dma_reserved>;
+
+		status = "okay";
+	};
+};
+
+/* Enable mailbox1 for MCU RX */
+&mailbox1 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+/* Enable mailbox3 for MCU TX */
+&mailbox3 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+/*
+ * Extend rockchip_amp with MCU resources
+ *
+ * Add clocks and pinctrl for:
+ *   - UART2 (DMX #2 output)
+ *   - UART5 (MCU debug console)
+ */
+&rockchip_amp {
+	/*
+	 * MUST redeclare ALL clocks (DTS doesn't support append)
+	 * Original from rk3506-amp.dtsi + MCU additions (UART2)
+	 */
+	clocks = <&cru HCLK_M0>, <&cru STCLK_M0>,
+		/* CPU2: UART3, UART4, I2C0, Timer */
+		<&cru SCLK_UART3>, <&cru PCLK_UART3>,
+		<&cru SCLK_UART4>, <&cru PCLK_UART4>,
+		<&cru CLK_I2C0>, <&cru PCLK_I2C0>,
+		<&cru PCLK_TIMER>, <&cru CLK_TIMER0_CH5>,
+		/* MCU: UART2 for DMX output */
+		<&cru SCLK_UART2>, <&cru PCLK_UART2>,
+		/* MCU: UART5 for debug console */
+		<&cru SCLK_UART5>, <&cru PCLK_UART5>,
+		/* MCU: INTMUX and MAILBOX clocks - prevent Linux clock gating */
+		<&cru PCLK_INTMUX>, <&cru PCLK_MAILBOX>;
+
+	/* Add UART2 (DMX) and UART5 (debug) pins for MCU */
+	/* UART2: RM_IO6 (TX), RM_IO7 (RX reserved) */
+	/* UART5: GPIO1_D2 (TX), GPIO1_D3 (RX) - fixed pins, mode m1 */
+	/* Original CPU2 pins + MCU pins (UART2 for DMX, UART5 for debug) */
+	pinctrl-0 = <&rm_io2_uart4_tx>, <&rm_io3_uart4_rx>,
+				<&rm_io4_uart3_tx>, <&rm_io5_uart3_rx>,
+				<&rm_io6_uart2_tx>, <&rm_io7_uart2_rx>,
+				<&rm_io12_i2c0_sda>, <&rm_io13_i2c0_scl>,
+				<&uart5m1_xfer_pins>;
+
+	/*
+	 * IRQ routing - SAME as original rk3506-amp.dtsi
+	 *
+	 * MCU does NOT use GIC - it has its own NVIC with MAILBOX_8MUX1_IRQn (22)
+	 * No GIC routing needed for MCU mailbox IRQs!
+	 *
+	 * The MCU receives ALL mailbox IRQs via the multiplexed IRQ 22,
+	 * then the HAL_MBOX_IrqHandler determines which MBOX triggered.
+	 */
+	amp-irqs = /bits/ 64 <
+		/* GPIO EXT (CPU2) */
+		GIC_AMP_IRQ_CFG_ROUTE(35, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(39, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(43, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(47, 0xd0, CPU_GET_AFFINITY(0, 2))
+		GIC_AMP_IRQ_CFG_ROUTE(51, 0xd0, CPU_GET_AFFINITY(0, 2))
+		/* UART3 (CPU2) */
+		GIC_AMP_IRQ_CFG_ROUTE(69, 0xd0, CPU_GET_AFFINITY(0, 2))
+		/* UART4 (CPU2 debug) */
+		GIC_AMP_IRQ_CFG_ROUTE(70, 0xd0, CPU_GET_AFFINITY(0, 2))
+		/* I2C0 (CPU2) */
+		GIC_AMP_IRQ_CFG_ROUTE(72, 0xd0, CPU_GET_AFFINITY(0, 2))
+		/* MAILBOX for CPU2 (MBOX2 = IRQ 176 = MAILBOX_BB_2) */
+		GIC_AMP_IRQ_CFG_ROUTE(176, 0xd0, CPU_GET_AFFINITY(0, 2))>;
+};
+
+/*
+ * Notes:
+ *
+ * 1. MCU UART2/UART5 IRQs go through INTMUX to M0+, not GIC.
+ *    They don't need GIC_AMP_IRQ_CFG_ROUTE entries.
+ *
+ * 2. MAILBOX architecture on RK3506:
+ *    - 4 separate MBOX instances (not 1 MBOX with 4 channels!)
+ *    - MBOX0: GIC SPI 138 - used by CPU2 (RX from Linux)
+ *    - MBOX1: GIC SPI 139 - used by MCU (RX from Linux)
+ *    - MBOX2: GIC SPI 140 - used by CPU2 (TX to Linux)
+ *    - MBOX3: GIC SPI 141 - used by MCU (TX to Linux)
+ *
+ * 3. MCU IRQ handling:
+ *    - MCU uses NVIC, not GIC
+ *    - MAILBOX_8MUX1_IRQn (22) is a SINGLE multiplexed IRQ for ALL 4 MBOX
+ *    - HAL_MBOX_IrqHandler determines which MBOX triggered
+ *    - NO GIC routing needed for MCU!
+ *
+ * 4. Memory layout:
+ *    0x03c00000 - CPU2 RPMSG (128KB)
+ *    0x03c20000 - MCU RPMSG (128KB)
+ *    0x03c40000 - Free space
+ *    0x03d00000 - DMA pool (shared)
+ *
+ * 5. To use this file, create a board DTS that includes this
+ *    instead of rk3506-amp.dtsi:
+ *
+ *    // rk3506g-luckfox-lyra-amp-mcu-spinand.dts
+ *    #include "rk3506-luckfox-lyra-ultra.dtsi"
+ *    #include "rk3506-amp-mcu.dtsi"  // Instead of rk3506-amp.dtsi
+ */

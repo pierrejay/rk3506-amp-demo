@@ -1,0 +1,52 @@
+# DMX Gateway - Dev config
+# Describes horticulture lighting setup (vertical farm)
+# For local run, using mock dmx client
+
+server:
+  http: ":8080"
+
+dmx:
+  client: "./scripts/mock_dmx_client.sh"
+  # device: "/dev/ttyRPMSG0"  # Optional: defaults to /dev/ttyRPMSG0
+  throttle_ms: 25
+  timeout_ms: 500
+  refresh_ms: 1000
+
+# Modbus TCP server (presence enables it)
+modbus:
+  port: ":5020"
+
+# MQTT: uncomment to enable
+# mqtt:
+#   broker: "tcp://localhost:1883"
+#   topic_prefix: "dmx"
+
+# Scheduler (test: events in next few seconds)
+schedule:
+  timezone: "Europe/Paris"
+  events:
+    - time: "06:00:00"
+      set:
+        rack1: { blue: 200, white: 100 }
+    - time: "22:00:00"
+      blackout: true
+
+lights:
+  rack1:
+    level1:
+      - { ch: 1, color: blue }
+      - { ch: 2, color: white }
+      - { ch: 3, color: red }
+      - { ch: 4, color: far_red }
+    level2:
+      - { ch: 5, color: blue }
+      - { ch: 6, color: white }
+      - { ch: 7, color: red }
+      - { ch: 8, color: far_red }
+
+  rack2:
+    level1:
+      - { ch: 9, color: blue }
+      - { ch: 10, color: white }
+      - { ch: 11, color: red }
+      - { ch: 12, color: far_red }

@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2025 Pierre Jay
+#
+# Luckfox Lyra SDK build environment
+#
+# Usage:
+#   cd <sdk-root>
+#   docker compose -f CUSTOM/build-docker/docker-compose.yml build
+#   docker compose -f CUSTOM/build-docker/docker-compose.yml run --rm sdk
+#
+#   # Inside container:
+#   ./build.sh lunch
+#   ./build.sh
+
+services:
+  sdk:
+    build:
+      context: .
+    image: luckfox-lyra-sdk:ubuntu22
+    container_name: lyra-build
+    volumes:
+      - ../..:/workspace
+    user: "${UID:-1000}:${GID:-1000}"
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
