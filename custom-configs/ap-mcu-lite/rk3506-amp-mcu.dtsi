@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * RK3506 AMP + MCU configuration
+ *
+ * This configuration uses BOTH real-time cores:
+ *   - CPU2 (Cortex-A7): RT-Thread RTOS
+ *   - MCU (Cortex-M0+): Bare-metal HAL
+ *
+ * Linux runs on CPU0 + CPU1 only (2 cores).
+ *
+ * Resources allocation:
+ *   CPU2 (RT-Thread):
+ *     - UART3 on RM_IO4 (TX) / RM_IO5 (RX)
+ *     - UART4 on RM_IO2 (TX) / RM_IO3 (RX) - debug console
+ *     - I2C0 on RM_IO12 (SDA) / RM_IO13 (SCL)
+ *     - Timer0 channel 5
+ *     - Mailbox 0/2 for RPMSG
+ *
+ *   MCU (bare-metal):
+ *     - UART2 on RM_IO6 (TX) / RM_IO7 (RX) - DMX output
+ *     - UART5 on GPIO1_D2/D3 - debug console
+ *     - Mailbox 1/3 for RPMSG
+ *
+ * Memory map:
+ *   0x03b00000 - 0x03bfffff : AMP shared memory (1 MB)
+ *   0x03c00000 - 0x03c1ffff : CPU2 RPMSG vring (128 KB)
+ *   0x03c20000 - 0x03c3ffff : MCU RPMSG vring (128 KB)
+ *   0x03d00000 - 0x03dfffff : RPMSG DMA pool (1 MB, shared)
+ *   0x03e00000 - 0x03efffff : RT-Thread code/data (1 MB)
+ *   0xfff80000 - 0xfff8bfff : MCU SRAM (48 KB)
+ *
+ * Linux devices:
+ *   /dev/ttyRPMSG0 - CPU2 (RT-Thread)
+ *   /dev/ttyRPMSG1 - MCU
+ */
+
+#include <dt-bindings/soc/rockchip-amp.h>
+
+#define CPU_GET_AFFINITY(cluster, cpu)		(cpu)
+
+/ {
+	/* Remove CPU2 from Linux - given to RT-Thread */
+	cpus {
+		/delete-node/ cpu@f02;
+	};
+
+	rockchip_amp: rockchip-amp {
+		compatible = "rockchip,amp";
+
+		/*
+		 * Clocks kept alive for CPU2 and MCU:
+		 *   - M0 core clocks (MCU)
+		 *   - UART2/3/4/5 for both cores
+		 *   - I2C0 for CPU2
+		 *   - Timer for CPU2
+		 *   - INTMUX/MAILBOX for MCU
+		 */
+		clocks = <&cru HCLK_M0>, <&cru STCLK_M0>,
+			/* CPU2: UART3, UART4, I2C0, Timer */
+			<&cru SCLK_UART3>, <&cru PCLK_UART3>,
+			<&cru SCLK_UART4>, <&cru PCLK_UART4>,
+			<&cru CLK_I2C0>, <&cru PCLK_I2C0>,
+			<&cru PCLK_TIMER>, <&cru CLK_TIMER0_CH5>,
+			/* MCU: UART2, UART5 */
+			<&cru SCLK_UART2>, <&cru PCLK_UART2>,
+			<&cru SCLK_UART5>, <&cru PCLK_UART5>,
+			/* MCU: INTMUX and MAILBOX */
+			<&cru PCLK_INTMUX>, <&cru PCLK_MAILBOX>;
+
+		/*
+		 * Pin assignments:
+		 *   - UART4 (CPU2 debug): RM_IO2 (TX), RM_IO3 (RX)
+		 *   - UART3 (CPU2 app):   RM_IO4 (TX), RM_IO5 (RX)
+		 *   - UART2 (MCU DMX):    RM_IO6 (TX), RM_IO7 (RX)
+		 *   - I2C0 (CPU2):        RM_IO12 (SDA), RM_IO13 (SCL)
+		 *   - UART5 (MCU debug):  GPIO1_D2/D3 (fixed pins)
+		 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&rm_io2_uart4_tx>, <&rm_io3_uart4_rx>,
+			    <&rm_io4_uart3_tx>, <&rm_io5_uart3_rx>,
+			    <&rm_io6_uart2_tx>, <&rm_io7_uart2_rx>,
+			    <&rm_io12_i2c0_sda>, <&rm_io13_i2c0_scl>,
+			    <&uart5m1_xfer_pins>;
+
+		/*
+		 * CPU affinity for AMP
+		 * Maps logical CPU IDs to physical affinity masks
+		 */
+		amp-cpu-aff-maskbits = /bits/ 64 <0x0 0x1 0x1 0x2 0x2 0x4>;
+
+		/*
+		 * IRQ routing to CPU2
+		 * MCU uses INTMUX/NVIC, not GIC - no routing needed
+		 */
+		amp-irqs = /bits/ 64 <
+			/* GPIO EXT */
+			GIC_AMP_IRQ_CFG_ROUTE(35, 0xd0, CPU_GET_AFFINITY(0, 2))
+			GIC_AMP_IRQ_CFG_ROUTE(39, 0xd0, CPU_GET_AFFINITY(0, 2))
+			GIC_AMP_IRQ_CFG_ROUTE(43, 0xd0, CPU_GET_AFFINITY(0, 2))
+			GIC_AMP_IRQ_CFG_ROUTE(47, 0xd0, CPU_GET_AFFINITY(0, 2))
+			GIC_AMP_IRQ_CFG_ROUTE(51, 0xd0, CPU_GET_AFFINITY(0, 2))
+			/* UART3 */
+			GIC_AMP_IRQ_CFG_ROUTE(69, 0xd0, CPU_GET_AFFINITY(0, 2))
+			/* UART4 */
+			GIC_AMP_IRQ_CFG_ROUTE(70, 0xd0, CPU_GET_AFFINITY(0, 2))
+			/* I2C0 */
+			GIC_AMP_IRQ_CFG_ROUTE(72, 0xd0, CPU_GET_AFFINITY(0, 2))
+			/* MAILBOX for CPU2 */
+			GIC_AMP_IRQ_CFG_ROUTE(176, 0xd0, CPU_GET_AFFINITY(0, 2))>;
+
+		status = "okay";
+	};
+
+	/* CPU2 RPMSG endpoint -> /dev/ttyRPMSG0 */
+	rpmsg: rpmsg@3c00000 {
+		compatible = "rockchip,rpmsg";
+		mbox-names = "rpmsg-rx", "rpmsg-tx";
+		mboxes = <&mailbox0 0 &mailbox2 0>;
+		rockchip,vdev-nums = <1>;
+		rockchip,link-id = <0x02>;
+		reg = <0x3c00000 0x20000>;
+		memory-region = <&rpmsg_dma_reserved>;
+
+		status = "okay";
+	};
+
+	/* MCU RPMSG endpoint -> /dev/ttyRPMSG1 */
+	rpmsg_mcu: rpmsg-mcu@3c20000 {
+		compatible = "rockchip,rpmsg";
+		mbox-names = "rpmsg-rx", "rpmsg-tx";
+		mboxes = <&mailbox1 0 &mailbox3 0>;
+		rockchip,vdev-nums = <1>;
+		rockchip,link-id = <0x04>;
+		reg = <0x3c20000 0x20000>;
+		memory-region = <&rpmsg_dma_reserved>;
+
+		status = "okay";
+	};
+};
+
+/* PMU only monitors CPU0 and CPU1 */
+&arm_pmu {
+	interrupt-affinity = <&cpu0>, <&cpu1>;
+};
+
+/* Mailboxes for CPU2 */
+&mailbox0 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+&mailbox2 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+/* Mailboxes for MCU */
+&mailbox1 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+&mailbox3 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+&reserved_memory {
+	/* CPU2 shared memory */
+	amp_shmem_reserved: amp-shmem@3b00000 {
+		reg = <0x03b00000 0x100000>;
+		no-map;
+	};
+
+	/* RPMSG ring buffers (CPU2 + MCU) */
+	rpmsg_reserved: rpmsg@3c00000 {
+		reg = <0x03c00000 0x100000>;
+		no-map;
+	};
+
+	/* RPMSG DMA pool (shared) */
+	rpmsg_dma_reserved: rpmsg-dma@3d00000 {
+		compatible = "shared-dma-pool";
+		reg = <0x03d00000 0x100000>;
+		no-map;
+	};
+
+	/* MCU SRAM */
+	mcu_reserved: mcu@fff80000 {
+		reg = <0xfff80000 0xc000>;
+		no-map;
+	};
+};

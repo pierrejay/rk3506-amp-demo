@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * RK3506 MCU-only AMP configuration
+ *
+ * This configuration keeps ALL 3 Cortex-A7 cores for Linux.
+ * Only the MCU (Cortex-M0+) runs real-time code.
+ *
+ * Compared to stock rk3506-amp.dtsi:
+ *   - REMOVED: /delete-node/ cpu@f02 (all 3 CPUs for Linux)
+ *   - REMOVED: amp-cpu-aff-maskbits (no CPU affinity override)
+ *   - REMOVED: amp-irqs routing (MCU uses INTMUX, not GIC)
+ *   - REMOVED: rpmsg node for CPU2 (mailbox0/2)
+ *   - REMOVED: amp_shmem_reserved (CPU2 shared memory)
+ *   - KEPT: MCU RPMSG via mailbox1/3
+ *   - KEPT: MCU peripheral clocks and pins
+ *
+ * Memory map:
+ *   0x03c00000 - 0x03c7ffff : RPMSG reserved (512 KB)
+ *   0x03c20000 - 0x03c3ffff : RPMSG MCU vring (128 KB within above)
+ *   0x03d00000 - 0x03dfffff : RPMSG DMA pool (1 MB)
+ *   0xfff80000 - 0xfff8bfff : MCU SRAM (48 KB)
+ *
+ * Usage:
+ *   #include "rk3506-mcu-only.dtsi"
+ */
+
+#include <dt-bindings/soc/rockchip-amp.h>
+
+/ {
+	/*
+	 * NO /delete-node/ cpu@f02 here!
+	 * All 3 Cortex-A7 cores remain available for Linux.
+	 */
+
+	rockchip_amp: rockchip-amp {
+		compatible = "rockchip,amp";
+
+		/*
+		 * Clocks kept alive for MCU:
+		 *   - HCLK_M0, STCLK_M0: MCU core clocks
+		 *   - UART2: DMX512 output (directly controlled by MCU)
+		 *   - UART5: MCU debug console
+		 *   - INTMUX: MCU interrupt controller
+		 *   - MAILBOX: RPMSG communication
+		 */
+		clocks = <&cru HCLK_M0>, <&cru STCLK_M0>,
+			<&cru SCLK_UART2>, <&cru PCLK_UART2>,
+			<&cru SCLK_UART5>, <&cru PCLK_UART5>,
+			<&cru PCLK_INTMUX>, <&cru PCLK_MAILBOX>;
+
+		/*
+		 * Pins reserved for MCU:
+		 *   - UART2 on RM_IO6 (TX) / RM_IO7 (RX) for DMX512
+		 *   - UART5 on GPIO1_D2/D3 for debug
+		 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&rm_io6_uart2_tx>, <&rm_io7_uart2_rx>,
+			    <&uart5m1_xfer_pins>;
+
+		status = "okay";
+	};
+
+	/*
+	 * MCU RPMSG endpoint
+	 *
+	 * Communication with MCU via virtio/rpmsg:
+	 *   - mailbox1: Linux RX (MCU TX)
+	 *   - mailbox3: Linux TX (MCU RX)
+	 *   - link-id 0x04: MCU endpoint identifier
+	 *
+	 * Creates /dev/ttyRPMSG0 in Linux for bidirectional
+	 * communication with MCU firmware.
+	 */
+	rpmsg_mcu: rpmsg-mcu@3c20000 {
+		compatible = "rockchip,rpmsg";
+		mbox-names = "rpmsg-rx", "rpmsg-tx";
+		mboxes = <&mailbox1 0 &mailbox3 0>;
+		rockchip,vdev-nums = <1>;
+		rockchip,link-id = <0x04>;
+		reg = <0x3c20000 0x20000>;
+		memory-region = <&rpmsg_dma_reserved>;
+
+		status = "okay";
+	};
+};
+
+/* Mailbox for MCU RX path */
+&mailbox1 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+/* Mailbox for MCU TX path */
+&mailbox3 {
+	rockchip,txpoll-period-ms = <1>;
+	status = "okay";
+};
+
+&reserved_memory {
+	/*
+	 * RPMSG ring buffer region
+	 * Must match MCU firmware configuration
+	 */
+	rpmsg_reserved: rpmsg@3c00000 {
+		reg = <0x03c00000 0x100000>;
+		no-map;
+	};
+
+	/*
+	 * RPMSG DMA buffer pool
+	 * Used for zero-copy data transfers
+	 */
+	rpmsg_dma_reserved: rpmsg-dma@3d00000 {
+		compatible = "shared-dma-pool";
+		reg = <0x03d00000 0x100000>;
+		no-map;
+	};
+
+	/*
+	 * MCU SRAM region
+	 * Fixed location in hardware
+	 */
+	mcu_reserved: mcu@fff80000 {
+		reg = <0xfff80000 0xc000>;
+		no-map;
+	};
+};

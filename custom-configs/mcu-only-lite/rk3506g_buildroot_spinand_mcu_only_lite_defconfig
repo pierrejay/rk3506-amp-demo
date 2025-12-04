@@ -1,0 +1,55 @@
+# RK3506G Luckfox Lyra - MCU High-Performance Headless Config
+#
+# Optimized for maximum Linux resources:
+#   - All 3 Cortex-A7 cores for Linux (no CPU2 stolen)
+#   - MCU (M0+) handles real-time tasks via RPMSG
+#   - No display subsystem (~32 MB saved)
+#   - No audio subsystem
+#
+# Expected performance:
+#   - RAM: ~117 MB available (vs ~80 MB stock)
+#   - Boot: ~4 seconds (vs ~8 seconds)
+#   - CPUs: 3 cores (vs 2 cores)
+#
+# Usage:
+#   ./build.sh lunch rk3506g_buildroot_spinand_mcu_only_lite_defconfig
+#   ./build.sh
+#
+# Result:
+#   - /dev/ttyRPMSG0 for MCU communication
+#   - 3 CPU cores for Linux applications
+#
+
+# Rootfs
+RK_ROOTFS=y
+RK_BUILDROOT_BASE_CFG="rk3506_luckfox"
+# RK_YOCTO is not set
+RK_ROOTFS_UBI=y
+RK_ROOTFS_HOSTNAME_CUSTOM=y
+RK_ROOTFS_HOSTNAME="luckfox"
+RK_ROOTFS_INSTALL_MODULES=y
+# RK_WIFIBT is not set
+# RK_ROOTFS_LOG_GUARDIAN is not set
+# RK_EXTRA_FONTS_ENABLED_EN is not set
+# RK_LUCKFOX_CONFIG is not set
+
+# U-Boot
+RK_UBOOT_CFG="rk3506_luckfox"
+RK_UBOOT_CFG_FRAGMENTS="rk-amp"
+
+# AMP configuration
+RK_AMP=y
+RK_AMP_FIT_ITS="amp_linux_mcu_only.its"
+RK_AMP_MCU_HAL_TARGET="rk3506-mcu"
+
+# Kernel
+RK_KERNEL_CFG="rk3506_luckfox_defconfig"
+RK_KERNEL_CFG_FRAGMENTS="rockchip_amp.config"
+RK_KERNEL_DTS_NAME="rk3506g-luckfox-lyra-mcu-only-lite-spinand"
+RK_BOOT_COMPRESSED=y
+
+# Partition
+RK_EXTRA_PARTITION_NUM=0
+RK_PARAMETER="parameter-lyra-spinand-amp.txt"
+RK_USE_FIT_IMG=y
+# RK_NETWORK_CHECK is not set

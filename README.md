@@ -113,6 +113,7 @@ rk3506-amp-dmx/
 ├── dmx-client/    # Linux C client - RPMSG bridge util
 ├── dmx-gateway/   # Go server - HTTP/WS/Modbus/MQTT (binary: dmx-gw)
 ├── build-docker/  # Docker environment for SDK build
+├── custom-configs/# Headless SDK configs (no display/audio bloat)
 └── README.md      # This file
 ```
 
@@ -122,7 +123,6 @@ rk3506-amp-dmx/
 | [firmware-mcu/](firmware-mcu/) | C (Rockchip HAL) | DMX512 on M0+ MCU - experimental |
 | [dmx-client/](dmx-client/) | C (Linux) | CLI for DMX commands via RPMSG |
 | [dmx-gateway/](dmx-gateway/) | Go | Multi-protocol API, Web UI, scheduler |
-| [build-docker/](build-docker/) | Docker | SDK build environment (Ubuntu 22.04) |
 
 ## Hardware
 
@@ -187,3 +187,15 @@ dmx timing                # Show frame rate, break, mab
 dmx timing 30             # Lower frame rate for picky receivers
 curl localhost:8080/api/status
 ```
+
+## Custom SDK Configurations
+
+Headless configs that remove display/audio subsystems for more RAM and faster boot:
+
+| Config | Linux CPUs | RT Core | RAM |
+|--------|-----------|---------|-----|
+| mcu-only-lite | 3 | MCU | ~117MB |
+| ap-only-lite | 2 | CPU2 | ~112MB |
+| ap-mcu-lite | 2 | CPU2+MCU | ~110MB |
+
+See [custom-configs/README.md](custom-configs/)

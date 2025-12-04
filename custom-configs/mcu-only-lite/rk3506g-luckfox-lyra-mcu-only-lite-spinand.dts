@@ -1,0 +1,323 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Luckfox Lyra RK3506G - MCU-only High-Performance Headless
+ *
+ * Optimized configuration for maximum Linux resources:
+ *   - All 3 Cortex-A7 cores for Linux
+ *   - MCU (M0+) handles real-time tasks (DMX512)
+ *   - No display subsystem (~32 MB RAM saved)
+ *   - No audio subsystem
+ *
+ * Performance vs stock:
+ *   - RAM: ~117 MB available (vs ~80 MB)
+ *   - Boot: ~4 seconds (vs ~8 seconds)
+ *   - CPUs: 3 cores (vs 2 cores)
+ *
+ * MCU communication:
+ *   /dev/ttyRPMSG0 - bidirectional channel to MCU
+ */
+
+/dts-v1/;
+
+#include "rk3506.dtsi"
+#include "rk3506-mcu-only.dtsi"
+
+/ {
+	model = "Luckfox Lyra RK3506G MCU High-Perf";
+	compatible = "rockchip,rk3506g-luckfox-lyra-mcu-only-lite", "rockchip,rk3506";
+
+	chosen {
+		bootargs = "earlycon=uart8250,mmio32,0xff0a0000 console=ttyFIQ0 root=ubi0:rootfs ubi.mtd=3 rootfstype=ubifs rootwait";
+	};
+
+	/*
+	 * Power regulators
+	 * Minimal set for headless operation
+	 */
+	vcc_sys: vcc-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+	};
+
+	vcc_3v3: vcc-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vcc_1v8: vcc-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_3v3>;
+	};
+
+	vcc_ddr: vcc-ddr {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ddr";
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vdd_0v9: vdd-0v9 {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_0v9";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vdd_cpu: vdd-cpu {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_cpu";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <500000>;
+		regulator-max-microvolt = <1500000>;
+		vin-supply = <&vdd_cpu>;
+	};
+
+	/* Kernel debug console */
+	fiq_debugger: fiq-debugger {
+		compatible = "rockchip,fiq-debugger";
+		rockchip,serial-id = <0>;
+		rockchip,wake-irq = <0>;
+		rockchip,irq-mode-enable = <1>;
+		rockchip,baudrate = <1500000>;
+		interrupts = <GIC_SPI 115 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	/* Status LED - heartbeat */
+	leds: leds {
+		compatible = "gpio-leds";
+		work_led: work-led {
+			gpios = <&gpio1 RK_PA0 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
+};
+
+/*============================================================
+ * CPU - All 3 cores for Linux
+ *============================================================*/
+
+&cpu0 {
+	cpu-supply = <&vdd_cpu>;
+	status = "okay";
+};
+
+/* CPU1 and CPU2 enabled by default in rk3506.dtsi */
+
+/*============================================================
+ * Display - DISABLED (saves ~32 MB)
+ *============================================================*/
+
+&cma {
+	/* No CMA needed without display */
+	size = <0x0>;
+};
+
+&display_subsystem {
+	status = "disabled";
+};
+
+&vop {
+	status = "disabled";
+};
+
+&dsi {
+	status = "disabled";
+};
+
+&dsi_dphy {
+	status = "disabled";
+};
+
+&rga2 {
+	status = "disabled";
+};
+
+/*============================================================
+ * Audio - DISABLED
+ *============================================================*/
+
+&sai0 {
+	status = "disabled";
+};
+
+&sai1 {
+	status = "disabled";
+};
+
+&sai2 {
+	status = "disabled";
+};
+
+&sai3 {
+	status = "disabled";
+};
+
+&acdcdig_dsm {
+	status = "disabled";
+};
+
+/*============================================================
+ * Storage
+ *============================================================*/
+
+/* SPI NAND Flash - boot device */
+&fspi {
+	status = "okay";
+
+	flash@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		spi-max-frequency = <80000000>;
+		spi-rx-bus-width = <4>;
+		spi-tx-bus-width = <1>;
+	};
+};
+
+/* SD Card - optional external storage */
+&mmc {
+	max-frequency = <52000000>;
+	bus-width = <4>;
+	no-sdio;
+	no-mmc;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	cd-gpios = <&gpio1 RK_PB6 GPIO_ACTIVE_LOW>;
+	disable-wp;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_clk_pins &sdmmc_cmd_pins &sdmmc_bus4_pins &sdmmc_det &sdmmc_pwren>;
+	vqmmc-supply = <&vcc_3v3>;
+	vmmc-supply = <&vcc_3v3>;
+	status = "okay";
+};
+
+/*============================================================
+ * Networking
+ *============================================================*/
+
+&gmac1 {
+	phy-mode = "rmii";
+	clock_in_out = "output";
+
+	snps,reset-gpio = <&gpio1 RK_PD0 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&eth_rmii1_miim_pins &eth_rmii1_tx_bus2_pins &eth_rmii1_rx_bus2_pins &eth_rmii1_clk_pins>;
+
+	phy-handle = <&rmii_phy1>;
+	status = "okay";
+};
+
+&mdio1 {
+	rmii_phy1: phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+	};
+};
+
+/*============================================================
+ * USB
+ *============================================================*/
+
+&usb20_otg0 {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usb20_otg1 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usb2phy {
+	status = "okay";
+};
+
+&u2phy_otg0 {
+	status = "okay";
+};
+
+&u2phy_otg1 {
+	status = "okay";
+};
+
+/*============================================================
+ * ADC
+ *============================================================*/
+
+&saradc {
+	vref-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+&tsadc {
+	status = "okay";
+};
+
+/*============================================================
+ * Pin Control
+ *============================================================*/
+
+&pinctrl {
+	sdmmc {
+		sdmmc_pwren: sdmmc-pwren {
+			rockchip,pins = <1 RK_PB7 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+
+		sdmmc_det: sdmmc-det {
+			rockchip,pins = <1 RK_PB6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+};
+
+/*============================================================
+ * Available for user configuration:
+ *
+ * UARTs (UART2/5 reserved for MCU):
+ *   &uart1, &uart3, &uart4
+ *
+ * I2C:
+ *   &i2c0, &i2c1, &i2c2
+ *
+ * SPI:
+ *   &spi0, &spi1
+ *
+ * PWM:
+ *   &pwm0, &pwm1, &pwm2
+ *
+ * Example - enable UART1 on RM_IO0/RM_IO1:
+ *
+ *   &uart1 {
+ *       pinctrl-names = "default";
+ *       pinctrl-0 = <&rm_io0_uart1_tx &rm_io1_uart1_rx>;
+ *       status = "okay";
+ *   };
+ *
+ * Example - enable I2C0 on RM_IO12/RM_IO13:
+ *
+ *   &i2c0 {
+ *       pinctrl-names = "default";
+ *       pinctrl-0 = <&rm_io12_i2c0_sda &rm_io13_i2c0_scl>;
+ *       status = "okay";
+ *   };
+ *============================================================*/

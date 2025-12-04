@@ -1,0 +1,52 @@
+# RK3506G Luckfox Lyra - AP Only Lite (Headless)
+#
+# Single real-time core configuration:
+#   - CPU0 + CPU1: Linux (2 cores)
+#   - CPU2: RT-Thread RTOS
+#   - MCU: Not used
+#
+# Optimizations:
+#   - No display subsystem (~32 MB saved)
+#   - No audio subsystem
+#
+# RPMSG device:
+#   /dev/ttyRPMSG0 - CPU2 (RT-Thread)
+#
+# Usage:
+#   ./build.sh lunch rk3506g_buildroot_spinand_ap_only_lite_defconfig
+#   ./build.sh
+#
+
+# Rootfs
+RK_ROOTFS=y
+RK_BUILDROOT_BASE_CFG="rk3506_luckfox"
+# RK_YOCTO is not set
+RK_ROOTFS_UBI=y
+RK_ROOTFS_HOSTNAME_CUSTOM=y
+RK_ROOTFS_HOSTNAME="luckfox"
+RK_ROOTFS_INSTALL_MODULES=y
+# RK_WIFIBT is not set
+# RK_ROOTFS_LOG_GUARDIAN is not set
+# RK_EXTRA_FONTS_ENABLED_EN is not set
+# RK_LUCKFOX_CONFIG is not set
+
+# U-Boot
+RK_UBOOT_CFG="rk3506_luckfox"
+RK_UBOOT_CFG_FRAGMENTS="rk-amp"
+
+# AMP configuration - CPU2 only
+RK_AMP=y
+RK_AMP_FIT_ITS="amp_linux.its"
+# No MCU target needed
+
+# Kernel
+RK_KERNEL_CFG="rk3506_luckfox_defconfig"
+RK_KERNEL_CFG_FRAGMENTS="rockchip_amp.config"
+RK_KERNEL_DTS_NAME="rk3506g-luckfox-lyra-ap-only-lite-spinand"
+RK_BOOT_COMPRESSED=y
+
+# Partition
+RK_EXTRA_PARTITION_NUM=0
+RK_PARAMETER="parameter-lyra-spinand-amp.txt"
+RK_USE_FIT_IMG=y
+# RK_NETWORK_CHECK is not set
