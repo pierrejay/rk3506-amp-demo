@@ -194,6 +194,7 @@ Headless configs that remove display/audio subsystems for more RAM and faster bo
 
 | Config | Linux CPUs | RT Core | RAM |
 |--------|-----------|---------|-----|
+| base-noamp-lite | 3 | None | ~120MB |
 | mcu-only-lite | 3 | MCU | ~117MB |
 | ap-only-lite | 2 | CPU2 | ~112MB |
 | ap-mcu-lite | 2 | CPU2+MCU | ~110MB |

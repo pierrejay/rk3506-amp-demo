@@ -4,16 +4,17 @@ Headless configs for Luckfox Lyra RK3506G. No display, no audio = more RAM, fast
 
 ## Configs
 
-| Config | Linux CPUs | Real-time | RAM | Boot | RPMSG |
-|--------|-----------|-----------|-----|------|-------|
-| **mcu-only-lite** | 3 | MCU | ~117MB | ~4s | `ttyRPMSG0` |
-| **ap-only-lite** | 2 | CPU2 (RT-Thread) | ~112MB | ~5s | `ttyRPMSG0` |
-| **ap-mcu-lite** | 2 | CPU2 + MCU | ~110MB | ~5s | `ttyRPMSG0`, `ttyRPMSG1` |
+| Config | Linux CPUs | Real-time | RAM | RPMSG |
+|--------|-----------|-----------|-----|-------|
+| **base-noamp-lite** | 3 | None | ~120MB | - |
+| **mcu-only-lite** | 3 | MCU | ~117MB | `ttyRPMSG0` |
+| **ap-only-lite** | 2 | CPU2 (RT-Thread) | ~112MB | `ttyRPMSG0` |
+| **ap-mcu-lite** | 2 | CPU2 + MCU | ~110MB | `ttyRPMSG0`, `ttyRPMSG1` |
 
 ## Deploy
 
 ```bash
-CONFIG="mcu-only-lite"  # or ap-only-lite, ap-mcu-lite
+CONFIG="base-noamp-lite"  # or mcu-only-lite, ap-only-lite, ap-mcu-lite
 
 # Copy to SDK
 cp CUSTOM/custom-configs/$CONFIG/*.dtsi kernel-6.1/arch/arm/boot/dts/
@@ -31,11 +32,16 @@ sudo ./rkflash.sh update
 
 ## Defconfig names
 
+- base-noamp-lite: `luckfox_lyra_plus_buildroot_spinand_lite_defconfig`
 - mcu-only-lite: `rk3506g_buildroot_spinand_mcu_only_lite_defconfig`
 - ap-only-lite: `rk3506g_buildroot_spinand_ap_only_lite_defconfig`
 - ap-mcu-lite: `rk3506g_buildroot_spinand_ap_mcu_lite_defconfig`
 
 ## Reserved pins
+
+### base-noamp-lite
+
+No reserved pins - all RM_IO available for Linux.
 
 ### mcu-only-lite
 
@@ -76,8 +82,8 @@ sudo ./rkflash.sh update
 
 ```
 <config>/
-├── rk3506-*.dtsi           # AMP config
+├── rk3506-*.dtsi           # AMP config (AMP configs only)
 ├── rk3506g-*-spinand.dts   # Board DTS
-├── amp_linux*.its          # FIT image
+├── amp_linux*.its          # FIT image (AMP configs only)
 └── *_defconfig             # SDK config
 ```
