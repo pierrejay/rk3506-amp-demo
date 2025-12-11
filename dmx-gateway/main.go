@@ -82,6 +82,15 @@ func main() {
 	// Initialize state manager
 	state := dmx.NewState(cfg, dmxClient, logger)
 
+	// Auto-enable DMX if configured
+	if cfg.DMX.AutoEnable {
+		if err := state.Enable(); err != nil {
+			logger.Warn("Failed to auto-enable DMX", "error", err)
+		} else {
+			logger.Info("DMX auto-enabled on startup")
+		}
+	}
+
 	// Start periodic refresh if configured
 	if cfg.DMX.RefreshMs > 0 {
 		state.StartRefresh(time.Duration(cfg.DMX.RefreshMs) * time.Millisecond)

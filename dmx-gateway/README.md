@@ -111,6 +111,7 @@ dmx:
   throttle_ms: 25        # Min delay between DMX updates
   timeout_ms: 500        # Command timeout
   refresh_ms: 1000       # Status polling interval
+  auto_enable: true      # Enable DMX output on startup (default: false)
 
 # Modbus TCP (optional - presence enables it)
 modbus:

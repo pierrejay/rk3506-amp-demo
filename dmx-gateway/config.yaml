@@ -1,5 +1,5 @@
 # DMX Gateway - Dev config
-# 1 multi-channel horticulture light
+# Multi-channel horticulture lights
 # For run on target using actual DMX client
 
 server:
@@ -8,10 +8,11 @@ server:
 dmx:
   client: "/usr/bin/dmx"
   # device: "/dev/ttyRPMSG0"  # Optional: defaults to /dev/ttyRPMSG0
+  auto_enable: true  # Enable DMX output on startup
 
-# Modbus TCP server (port 502 for production)
+# Modbus TCP server (port 503 for production)
 modbus:
-  port: ":502"
+  port: ":503"
 
 # MQTT: uncomment to enable
 # mqtt:
@@ -26,3 +27,13 @@ lights:
       - { ch: 2, color: blue }
       - { ch: 3, color: white }
       - { ch: 4, color: far_red }
+    level2:
+      - { ch: 11, color: red }
+      - { ch: 12, color: blue }
+      - { ch: 13, color: white }
+      - { ch: 14, color: far_red }
+    level3:
+      - { ch: 21, color: red }
+      - { ch: 22, color: blue }
+      - { ch: 23, color: white }
+      - { ch: 24, color: far_red }

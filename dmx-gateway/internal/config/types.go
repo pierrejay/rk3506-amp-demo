@@ -54,7 +54,8 @@ type DMXConfig struct {
 	Device     string `yaml:"device,omitempty"` // RPMSG device (e.g. /dev/ttyRPMSG1), empty = client default
 	ThrottleMs int    `yaml:"throttle_ms"`
 	TimeoutMs  int    `yaml:"timeout_ms"`
-	RefreshMs  int    `yaml:"refresh_ms"` // Periodic state refresh (0 = disabled)
+	RefreshMs  int    `yaml:"refresh_ms"`  // Periodic state refresh (0 = disabled)
+	AutoEnable bool   `yaml:"auto_enable"` // Enable DMX output on startup
 }
 
 // Channel defines a single DMX channel with color
