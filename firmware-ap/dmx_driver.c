@@ -252,14 +252,46 @@ int dmx_init(void)
         return ret;
     }
 
-    /* Open UART in simple mode (no DMA, no interrupts) */
-    ret = rt_device_open(g_dmx.uart_dev, RT_DEVICE_FLAG_RDWR);
+    /* Open UART with interrupt TX (crucial for 44Hz - non-blocking write) */
+    ret = rt_device_open(g_dmx.uart_dev, RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_INT_TX);
     if (ret != RT_EOK) {
         rt_kprintf("[DMX] ERROR: Failed to open UART (ret=%d)\n", ret);
         return ret;
     }
 
     rt_kprintf("[DMX] UART3 opened successfully\n");
+
+    /*
+     * HARDWARE SYNC FIX: Force Baudrate Generator Latch
+     *
+     * Issue: Back-to-back writes to LCR violate setup timing on the APB bus
+     * for the Rockchip UART IP, causing the baud rate divisor to be ignored.
+     * Symptom: 23-25 Hz frame rate instead of 40 Hz.
+     *
+     * Fix: Toggle DLAB (Divisor Latch Access Bit) and perform a DUMMY READ
+     * of the DLL register. This read acts as a hardware memory barrier, forcing
+     * the CPU to wait for the bus transaction to complete. This ensures DLAB
+     * remains high long enough for the UART logic to latch the new baud rate.
+     *
+     * DO NOT REMOVE - this is not dead code!
+     */
+    {
+        volatile struct UART_REG *reg = g_dmx.uart_hw;
+        uint32_t lcr_save = reg->LCR;
+        volatile uint32_t dummy;
+
+        /* 1. Set DLAB to access Divisors */
+        reg->LCR = lcr_save | 0x80;
+        __asm__ volatile("dsb sy" ::: "memory");
+
+        /* 2. CRITICAL: Dummy read to force bus synchronization */
+        dummy = reg->DLL;
+        (void)dummy;
+
+        /* 3. Restore LCR (Clear DLAB) */
+        reg->LCR = lcr_save;
+        __asm__ volatile("dsb sy" ::: "memory");
+    }
 
     /* Create mutex */
     g_dmx.mutex = rt_mutex_create("dmx_mtx", RT_IPC_FLAG_PRIO);
