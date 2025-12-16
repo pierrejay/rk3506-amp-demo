@@ -52,16 +52,23 @@ static struct {
 } g_dmx;
 
 /* ============================================================================
- * UART Break Generation - LCR METHOD (VALIDATED!)
+ * UART Break Generation - LCR METHOD
  * ============================================================================ */
 
 /* Register Bit Masks */
 #define UART_LCR_BREAK      (1 << 6)  /* Bit 6: Break Control */
+#define UART_LCR_8N2        0x07      /* 8 data bits, 2 stop bits, no parity, DLAB=0, BREAK=0 */
+#define UART_FCR_FIFO_EN    0x07      /* Enable FIFO + clear RX/TX FIFOs */
 #define UART_USR_BUSY       (1 << 0)  /* Bit 0: UART Busy */
+#define UART_USR_TFNF       (1 << 1)  /* Bit 1: TX FIFO Not Full */
 #define UART_USR_TFE        (1 << 2)  /* Bit 2: TX FIFO Empty */
 
 /**
  * Wait for UART to be completely idle (CRITICAL for DMX!)
+ *
+ * TODO: Timeout is silent - if we timeout, we continue anyway which could
+ * cause weird states. Consider: errors++, log once, recovery sequence
+ * (LCR=8N2, FCR=0x07 purge, re-check idle).
  */
 static void uart_wait_idle(volatile struct UART_REG *uart)
 {
@@ -78,24 +85,67 @@ static void uart_wait_idle(volatile struct UART_REG *uart)
 }
 
 /**
+ * Direct polling TX - bypass RT-Thread serial driver entirely.
+ *
+ * CRITICAL: Forces LCR to known good 8N2 state to ensure:
+ * - DLAB=0 (access THR, not DLL)
+ * - BREAK=0 (release line if stuck from previous break)
+ * - Correct frame format (8N2)
+ */
+static void uart_tx_poll(volatile struct UART_REG *uart, const uint8_t *buf, size_t len)
+{
+    /*
+     * 1. FORCE LCR to clean 8N2 state (no RMW!)
+     * This clears BREAK bit if stuck, sets DLAB=0, ensures 8N2 format.
+     */
+    uart->LCR = UART_LCR_8N2;
+    __asm__ volatile("dsb sy" ::: "memory");
+
+    /*
+     * 2. Enable FIFO (required for USR.TFNF to be valid on DW_apb_uart)
+     * FCR is write-only at offset 0x08 (same as IIR read)
+     *
+     * TODO: FCR=0x07 resets TX/RX FIFOs every frame (overkill).
+     * Could do FCR=0x01 once at init, FCR=0x07 only on error recovery.
+     */
+    uart->FCR = UART_FCR_FIFO_EN;
+    __asm__ volatile("dsb sy" ::: "memory");
+
+    /* 3. Blast data into FIFO */
+    for (size_t i = 0; i < len; i++) {
+        /* Wait for TX FIFO to have space */
+        while (!(uart->USR & UART_USR_TFNF)) {
+            /* spin */
+        }
+        uart->THR = buf[i];
+    }
+
+    /* 4. Wait for transmission to fully complete */
+    while (!((uart->USR & UART_USR_TFE) && !(uart->USR & UART_USR_BUSY))) {
+        /* spin */
+    }
+}
+
+/**
  * Send UART Break - Direct LCR register access
  *
  * Uses hardware timer (TIMER5 @ 24MHz) for accurate timing.
  * IRQs disabled to prevent jitter during timing-critical section.
+ *
+ * IMPORTANT: Uses absolute LCR writes (no RMW) to avoid BREAK bit getting stuck.
  */
 static void uart_send_break_mab(volatile struct UART_REG *uart3, uint32_t break_us, uint32_t mab_us)
 {
     /* CRITICAL SECTION: Break + MAB must be atomic */
     rt_base_t level = rt_hw_interrupt_disable();
 
-    /* BREAK: Activate */
-    uint32_t lcr = uart3->LCR;
-    uart3->LCR = lcr | UART_LCR_BREAK;
-    __asm__ volatile("dsb sy" ::: "memory");  /* Flush to hardware */
+    /* BREAK: Set LCR to 8N2 + BREAK bit (absolute write, no RMW) */
+    uart3->LCR = UART_LCR_8N2 | UART_LCR_BREAK;
+    __asm__ volatile("dsb sy" ::: "memory");
     rt_hw_us_delay(break_us);
 
-    /* Clear break */
-    uart3->LCR = lcr;
+    /* Clear break: restore clean 8N2 (absolute write) */
+    uart3->LCR = UART_LCR_8N2;
     __asm__ volatile("dsb sy" ::: "memory");
 
     /* MAB: Mark After Break */
@@ -119,7 +169,6 @@ static void uart_send_break_mab(volatile struct UART_REG *uart3, uint32_t break_
  */
 static void dmx_tx_thread_entry(void *parameter)
 {
-    rt_size_t sent;
     uint32_t frame_start;
 
 #ifdef DMX_DEBUG_TEXT_MODE
@@ -137,15 +186,9 @@ static void dmx_tx_thread_entry(void *parameter)
 
 #ifdef DMX_DEBUG_TEXT_MODE
         /* DEBUG MODE: Send "HELLO\n" every 100ms */
-        const char *test_msg = "HELLO\n";
-        sent = rt_device_write(g_dmx.uart_dev, 0, test_msg, 6);
-
-        if (sent != 6) {
-            rt_kprintf("[DMX] WARNING: Only sent %d/6 bytes\n", sent);
-        } else {
-            g_dmx.frame_count++;
-        }
-
+        const uint8_t test_msg[] = "HELLO\n";
+        uart_tx_poll(g_dmx.uart_hw, test_msg, 6);
+        g_dmx.frame_count++;
         rt_thread_mdelay(100);  /* 10 Hz for readability */
         continue;
 #endif
@@ -164,15 +207,9 @@ static void dmx_tx_thread_entry(void *parameter)
         /* Send BREAK + MAB (atomic, timer-based timing) */
         uart_send_break_mab(g_dmx.uart_hw, g_dmx.break_us, g_dmx.mab_us);
 
-        /* Send DATA via RT-Thread driver */
-        sent = rt_device_write(g_dmx.uart_dev, 0, g_dmx.frame_buf, DMX_FRAME_SIZE);
-
-        if (sent != DMX_FRAME_SIZE) {
-            rt_kprintf("[DMX] WARNING: Only sent %d/%d bytes\n", sent, DMX_FRAME_SIZE);
-            g_dmx.errors++;
-        } else {
-            g_dmx.frame_count++;
-        }
+        /* Send DATA via direct polling (bypass RT-Thread serial driver) */
+        uart_tx_poll(g_dmx.uart_hw, g_dmx.frame_buf, DMX_FRAME_SIZE);
+        g_dmx.frame_count++;
 
         /* Calculate FPS every second */
         uint32_t now = rt_tick_get();
@@ -189,18 +226,18 @@ static void dmx_tx_thread_entry(void *parameter)
             g_dmx.last_frame_count = g_dmx.frame_count;
         }
 
-        /* Step 4: Maintain frame rate (dynamic, based on refresh_hz) */
-        uint32_t elapsed_ticks = rt_tick_get() - frame_start;
-        uint32_t frame_period_us = 1000000 / g_dmx.refresh_hz;
-        uint32_t target_ticks = (frame_period_us * RT_TICK_PER_SECOND) / 1000000;
-
-        if (elapsed_ticks < target_ticks) {
-            /* Frame completed early - delay to maintain rate */
-            rt_thread_delay(target_ticks - elapsed_ticks);
-        } else {
-            /* Frame took full time or longer - just yield to scheduler */
-            rt_thread_yield();
+        /*
+         * Pacing: At 44Hz we're at physical limit (~22.7ms/frame), just loop.
+         * For lower rates, add delay in µs after frame completion.
+         */
+        if (g_dmx.refresh_hz < DMX_REFRESH_HZ_MAX) {
+            uint32_t frame_period_us = 1000000 / g_dmx.refresh_hz;
+            uint32_t elapsed_us = (rt_tick_get() - frame_start) * 1000000 / RT_TICK_PER_SECOND;
+            if (elapsed_us < frame_period_us) {
+                rt_hw_us_delay(frame_period_us - elapsed_us);
+            }
         }
+        /* At max rate (44Hz), continue immediately - no delay needed */
     }
 
     rt_kprintf("[DMX] TX thread stopped\n");
@@ -252,8 +289,8 @@ int dmx_init(void)
         return ret;
     }
 
-    /* Open UART with interrupt TX (crucial for 44Hz - non-blocking write) */
-    ret = rt_device_open(g_dmx.uart_dev, RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_INT_TX);
+    /* Open UART via RT-Thread (for init/config), but TX is done via direct register polling */
+    ret = rt_device_open(g_dmx.uart_dev, RT_DEVICE_FLAG_RDWR);
     if (ret != RT_EOK) {
         rt_kprintf("[DMX] ERROR: Failed to open UART (ret=%d)\n", ret);
         return ret;
@@ -262,34 +299,22 @@ int dmx_init(void)
     rt_kprintf("[DMX] UART3 opened successfully\n");
 
     /*
-     * HARDWARE SYNC FIX: Force Baudrate Generator Latch
+     * HARDWARE SYNC FIX: Force baud rate latch via DLAB toggle + DLL read.
+     * Was added to fix 25Hz issue, but root cause was RMW on LCR (BREAK stuck).
      *
-     * Issue: Back-to-back writes to LCR violate setup timing on the APB bus
-     * for the Rockchip UART IP, causing the baud rate divisor to be ignored.
-     * Symptom: 23-25 Hz frame rate instead of 40 Hz.
-     *
-     * Fix: Toggle DLAB (Divisor Latch Access Bit) and perform a DUMMY READ
-     * of the DLL register. This read acts as a hardware memory barrier, forcing
-     * the CPU to wait for the bus transaction to complete. This ensures DLAB
-     * remains high long enough for the UART logic to latch the new baud rate.
-     *
-     * DO NOT REMOVE - this is not dead code!
+     * TODO: Now that uart_tx_poll() forces LCR=0x07 before every TX, this
+     * block may be redundant. Test removing it once stability is confirmed.
      */
     {
         volatile struct UART_REG *reg = g_dmx.uart_hw;
         uint32_t lcr_save = reg->LCR;
         volatile uint32_t dummy;
 
-        /* 1. Set DLAB to access Divisors */
-        reg->LCR = lcr_save | 0x80;
+        reg->LCR = lcr_save | 0x80;  /* Set DLAB */
         __asm__ volatile("dsb sy" ::: "memory");
-
-        /* 2. CRITICAL: Dummy read to force bus synchronization */
-        dummy = reg->DLL;
+        dummy = reg->DLL;            /* Dummy read for bus sync */
         (void)dummy;
-
-        /* 3. Restore LCR (Clear DLAB) */
-        reg->LCR = lcr_save;
+        reg->LCR = lcr_save;         /* Clear DLAB */
         __asm__ volatile("dsb sy" ::: "memory");
     }
 
